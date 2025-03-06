@@ -1,57 +1,72 @@
 const express = require("express");
-const fs = require("fs");
+const mysql = require("mysql2");
 const cors = require("cors");
 const bodyParser = require("body-parser");
+require("dotenv").config(); // 환경 변수 관리
 
 const app = express();
 const PORT = 5000;
-const DATA_FILE = "./data/team.json";
+
+// 📌 MySQL 연결 설정
+const db = mysql.createConnection({
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "password",
+    database: process.env.DB_NAME || "bsksbamboo"
+});
+
+db.connect((err) => {
+    if (err) {
+        console.error("❌ MySQL 연결 오류:", err);
+        return;
+    }
+    console.log("✅ MySQL 연결 성공!");
+});
 
 // 미들웨어 설정
 app.use(cors());
 app.use(bodyParser.json());
 
-// 📌 1. 팀원 조회 (GET /members)
+// 📌 1️⃣ 팀원 조회 (GET /members)
 app.get("/members", (req, res) => {
-    fs.readFile(DATA_FILE, "utf8", (err, data) => {
-        if (err) return res.status(500).json({ error: "파일을 읽을 수 없습니다." });
-        res.json(JSON.parse(data));
+    const sql = "SELECT * FROM MEMBER_TB";
+    db.query(sql, (err, results) => {
+        if (err) return res.status(500).json({ error: "데이터를 불러올 수 없습니다." });
+        res.json(results);
     });
 });
 
-// 📌 2. 팀원 등록 (POST /members)
+// 📌 2️⃣ 팀원 등록 (POST /members)
 app.post("/members", (req, res) => {
-    const { name, role, workStyle, mbti, hobby, goal, photo } = req.body;
-    if (!name || !role) return res.status(400).json({ error: "이름과 역할은 필수 입력값입니다." });
+    const { name, rank, mbti, style, objective, hobby } = req.body;
+    if (!name || !rank) return res.status(400).json({ error: "이름과 역할은 필수 입력값입니다." });
 
-    fs.readFile(DATA_FILE, "utf8", (err, data) => {
-        if (err) return res.status(500).json({ error: "파일을 읽을 수 없습니다." });
+    const sql = `
+        INSERT INTO MEMBER_TB (MEMBER_NAME, MEMBER_RANK, MEMBER_MBTI, MEMBER_STYLE, MEMBER_OBJECTIVE, MEMBER_HOBBY) 
+        VALUES (?, ?, ?, ?, ?, ?)
+    `;
+    const values = [name, rank, mbti, style, objective, hobby];
 
-        let members = JSON.parse(data);
-        const newMember = { id: Date.now(), name, role, workStyle, mbti, hobby, goal, photo };
-        members.push(newMember);
+    db.query(sql, values, (err, result) => {
+        if (err) return res.status(500).json({ error: "데이터를 저장할 수 없습니다." });
 
-        fs.writeFile(DATA_FILE, JSON.stringify(members, null, 2), (err) => {
-            if (err) return res.status(500).json({ error: "파일을 저장할 수 없습니다." });
-            res.status(201).json(newMember);
-        });
+        res.status(201).json({ id: result.insertId, name, rank, mbti, style, objective, hobby });
     });
 });
 
-// 📌 3. 팀원 삭제 (DELETE /members/:id)
-app.delete("/members/:id", (req, res) => {
-    const memberId = parseInt(req.params.id);
+// 📌 3️⃣ 팀원 삭제 (DELETE /members/:name)
+app.delete("/members/:name", (req, res) => {
+    const memberName = req.params.name;
+    const sql = "DELETE FROM MEMBER_TB WHERE MEMBER_NAME = ?";
 
-    fs.readFile(DATA_FILE, "utf8", (err, data) => {
-        if (err) return res.status(500).json({ error: "파일을 읽을 수 없습니다." });
+    db.query(sql, [memberName], (err, result) => {
+        if (err) return res.status(500).json({ error: "데이터를 삭제할 수 없습니다." });
 
-        let members = JSON.parse(data);
-        const newMembers = members.filter(member => member.id !== memberId);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: "해당 팀원을 찾을 수 없습니다." });
+        }
 
-        fs.writeFile(DATA_FILE, JSON.stringify(newMembers, null, 2), (err) => {
-            if (err) return res.status(500).json({ error: "파일을 저장할 수 없습니다." });
-            res.json({ message: "삭제 완료", id: memberId });
-        });
+        res.json({ message: "삭제 완료", name: memberName });
     });
 });
 
